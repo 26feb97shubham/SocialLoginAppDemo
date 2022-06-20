@@ -5,8 +5,11 @@
     <string name="facebook_client_token">cc55af79eb959800a8b2d5afc64cd8e7</string>
 
     <string name="instagram_app_id">1007663336553785</string>
-    <string name="instagram_client_token">IGQVJYYkdCRzd6MXgweXcyY0hOZADdwVVYwOW5jVTVhWktkaHNyTGNBOEdnZAHJlRXd4YzNNa0ZAKbDRjRGxfWUxIUXBEZAmVLb3FTdHQ2Sk9nd29SUThFRVJaemNfUDJQdzQyZA1RXNXNIaWFoMmJ6MXpDYwZDZD</string>
+    <string name="instagram_client_token">IGQVJYVDhCakxJSkUtMGNTMExZAdUhJa01HZAzNfel81bnVHMWdLVC1LTS1aU2pZAem9FWFFySjNOamJ6cUJ0ZAWxSNDV1TzhBRy1wc1FVVHpwQ3pyMDRhREhISURFWm0ydXg5Y20weFBsaGdZAMTVTMGdFUQZDZD</string>
     <!-- TODO: Remove or change this placeholder text -->
     <string name="hello_blank_fragment">Hello blank fragment</string>
+
+    <string name="twitter_consumer_key" translatable="false">oHKTv6Mw2TZYlNgZJ45XYoMHY</string>
+    <string name="twitter_consumer_secret_key" translatable="false">vcJqddAcjoIpdlcETozOXuSMauyDh2PgFT5JbL9Q53vXB25nzu</string>
 
 </resources>

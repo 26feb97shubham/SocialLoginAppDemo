@@ -1,33 +1,56 @@
 package com.login.socialloginappdemo
 
+import android.R.attr
+import android.content.DialogInterface
 import android.content.Intent
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Message
+import android.text.TextUtils
 import android.util.Log
+import android.view.LayoutInflater
 import android.widget.Button
 import android.widget.TextView
-import com.facebook.*
-import com.facebook.login.LoginResult
-import com.facebook.login.widget.LoginButton
-import java.util.*
-import com.facebook.ProfileTracker
-import com.facebook.login.LoginManager
-import org.json.JSONException
-import org.json.JSONObject
 import android.widget.Toast
-import com.login.socialloginappdemo.InstagramApp.OAuthAuthenticationListener
-import android.content.DialogInterface
-import android.view.LayoutInflater
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import com.facebook.*
+import com.facebook.AccessToken.Companion.getCurrentAccessToken
+import com.facebook.login.LoginManager
+import com.facebook.login.LoginResult
+import com.facebook.login.widget.LoginButton
+import com.login.socialloginappdemo.InstagramApp.OAuthAuthenticationListener
 import com.login.socialloginappdemo.MyInstagramDialog.Companion.myInstagramDialogWebViewURL
+import com.twitter.sdk.android.core.*
+import com.twitter.sdk.android.core.identity.TwitterLoginButton
+import org.json.JSONException
+import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.OutputStreamWriter
-import java.lang.Exception
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.*
+
+import twitter4j.StatusUpdate
+import twitter4j.Twitter
+import twitter4j.TwitterException
+import twitter4j.TwitterFactory
+import twitter4j.User
+import twitter4j.auth.AccessToken
+import twitter4j.auth.RequestToken
+import twitter4j.conf.Configuration
+import twitter4j.conf.ConfigurationBuilder
+import com.twitter.sdk.android.core.TwitterConfig
+
+import com.twitter.sdk.android.core.TwitterAuthConfig
+import android.content.SharedPreferences
+import android.net.Uri
+import com.facebook.CustomTabMainActivity.Companion.EXTRA_URL
+import android.app.ProgressDialog
+import android.R.attr.data
+import android.os.StrictMode
+import android.os.StrictMode.ThreadPolicy
 
 
 class MainActivity : AppCompatActivity() {
@@ -37,7 +60,7 @@ class MainActivity : AppCompatActivity() {
     private val INSTAGRAM_BASIC = "instagram_basic"
     private val PAGES_SHOW_LIST = "pages_show_list"
     private var accessTokenTracker : AccessTokenTracker?=null
-    private var accessToken : AccessToken?=null
+    private var accessToken : com.facebook.AccessToken?=null
     private var profileTracker : ProfileTracker?=null
     private var tvUsername : TextView?=null
     private var tvName : TextView?=null
@@ -51,34 +74,45 @@ class MainActivity : AppCompatActivity() {
     private val AUTH_URL = "https://api.instagram.com/oauth/authorize/"
     private val TOKEN_URL = "https://api.instagram.com/oauth/access_token"
     private val API_URL = "https://api.instagram.com/v1"
+    private val GRAPH_API_URL = "https://graph.instagram.com/v14.0"
     private var mAuthUrl: String? = null
     private var mAccessToken: String? = null
     private var mSession: InstagramSession? = null
+
+    private var myStatusCode = ""
 
     private var myInstagramDialog : MyInstagramDialog?=null
     private var mHandler : Handler?=null
     var WHAT_FINALIZE = 0
     private val userInfo = HashMap<String, String>()
 
-
-    val TAG_DATA = "data"
-    val TAG_ID = "id"
-    val TAG_PROFILE_PICTURE = "profile_picture"
-    val TAG_USERNAME = "username"
-    val TAG_BIO = "bio"
-    val TAG_WEBSITE = "website"
-    val TAG_COUNTS = "counts"
-    val TAG_FOLLOWS = "follows"
-    val TAG_FOLLOWED_BY = "followed_by"
-    val TAG_MEDIA = "media"
-    val TAG_FULL_NAME = "full_name"
-    val TAG_META = "meta"
-    val TAG_CODE = "code"
+    private var twitterLoginButton : Button?=null
 
     private var myAccessToken = ""
     private var myId = ""
     private var myUser = ""
     private var myName = ""
+
+    private var twitter_consumer_key = "oHKTv6Mw2TZYlNgZJ45XYoMHY"
+    private var twitter_consumer_secret_key = "vcJqddAcjoIpdlcETozOXuSMauyDh2PgFT5JbL9Q53vXB25nzu"
+    private var mAuthVerifier = "oauth_verifier"
+    private var isTwitterAuthenticated = false
+
+    val PREF_NAME = "sample_twitter_pref"
+    val PREF_USER_NAME = "twitter_user_name"
+    val WEBVIEW_REQUEST_CODE = 100
+    private val PREF_KEY_OAUTH_TOKEN = "oauth_token"
+    private val PREF_KEY_OAUTH_SECRET = "oauth_token_secret"
+    private val PREF_KEY_TWITTER_LOGIN = "is_twitter_loggedin"
+
+    private var mConsumerKey: String? = null
+    private var mConsumerSecret: String? = null
+    private val mCallbackUrl : String? =null
+    private var mTwitterVerifier: String? = null
+    private var mTwitter: Twitter? = null
+    private var mRequestToken: RequestToken? = null
+    private var mSharedPreferences: SharedPreferences? = null
+    private var mPostProgress: ProgressDialog? = null
 
 
 
@@ -111,6 +145,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val policy = ThreadPolicy.Builder().permitAll().build()
+        StrictMode.setThreadPolicy(policy)
         FacebookSdk.sdkInitialize(applicationContext)
         setContentView(R.layout.activity_main)
 
@@ -122,9 +158,12 @@ class MainActivity : AppCompatActivity() {
         tvName = findViewById(R.id.tvName)
         mSession = InstagramSession(this)
         mAccessToken = InstagramSession(this).getAccessToken()
+        twitterLoginButton = findViewById(R.id.twitterLoginButton)
 
         val myInstagramDialog = MyInstagramDialog()
         myInstagramDialog.isCancelable = false
+
+        initSDK()
 
         mHandler = object : Handler() {
             override fun handleMessage(msg: Message) {
@@ -137,11 +176,22 @@ class MainActivity : AppCompatActivity() {
                 } else if (msg.what === WHAT_FETCH_INFO) {
                     myInstagramDialog.myAuthenticationListener!!.onSuccess()
                 }else if(msg.what === WHAT_FINALIZE){
-                    tvUsername?.text =myId
-                    tvName?.text = myId
+                    tvUsername?.text =myUserName
+                    tvName?.text = myUserName
                 }
             }
         }
+
+
+        twitterLoginButton?.setOnClickListener {
+            if (isAuthenticated()) {
+                Toast.makeText(getApplicationContext(), "Success", Toast.LENGTH_SHORT).show();
+            } else {
+                loginToTwitter()
+            }
+        }
+
+
 
 
         setWidgetReference()
@@ -206,7 +256,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         loginButtonInstagram?.setOnClickListener {
-            if (mApp!!.hasAccessToken()) {
+            if (myAccessToken.isNotEmpty()) {
                 val builder: AlertDialog.Builder = AlertDialog.Builder(
                     this@MainActivity
                 )
@@ -214,7 +264,7 @@ class MainActivity : AppCompatActivity() {
                     .setCancelable(false)
                     .setPositiveButton("Yes",
                         DialogInterface.OnClickListener { dialog, id ->
-                            mApp!!.resetAccessToken()
+                            myAccessToken = ""
                             // btnConnect.setVisibility(View.VISIBLE);
                             loginButtonInstagram?.setText("Connect")
                             // tvSummary.setText("Not connected");
@@ -235,7 +285,6 @@ class MainActivity : AppCompatActivity() {
                 myInstagramDialog?.setCompleteAuthCallback(object : MyInstagramDialog.MyAuthListener{
                     override fun onComplete(accessToken: String?) {
                         getAccessToken(accessToken)
-
                     }
 
                     override fun onError(error: String?) {
@@ -251,7 +300,51 @@ class MainActivity : AppCompatActivity() {
                         tvUsername?.text =myUser
                         tvName?.text = myName
                         // userInfoHashmap = mApp!!.getUserInfo()
-                       fetchUserName(mHandler as Handler, myAccessToken, myId, "", "")
+                        fetchUserName(mHandler as Handler, myAccessToken, myId, "", "")
+
+                        /*request1 = GraphRequest.newMeRequest(AccessToken.getCurrentAccessToken(), object : GraphRequest.GraphJSONObjectCallback{
+                            override fun onCompleted(obj: JSONObject?, response: GraphResponse?) {
+                                try {
+                                    var email_id = obj?.getString("email")
+                                    var gender = obj?.getString("gender")
+                                    var profile_name = obj?.getString("name")
+                                    var fb_id = obj?.getLong("id")
+
+                                    Log.e("data", obj.toString())
+                                    Log.e("graphresponse", response.toString())
+                                    tvUsername?.text = obj?.getString("name")
+                                    tvName?.text = obj?.getString("name")
+
+                                }catch (e : JSONException){
+
+                                }
+                            }
+
+                        })
+
+                        *//*var bundle = Bundle()
+                        bundle.putString("fields")
+                        bundle.putString("name")
+                        bundle.putString("gender")
+                        bundle.putString("email")
+                        bundle.putString("first_name")
+                        bundle.putString("last_name")*//*
+
+                        request1?.executeAsync()*/
+
+                        /*  GraphRequest(
+                              AccessToken.getCurrentAccessToken(),
+                              "/{instagram-user-id}",
+                              null, HttpMethod.GET,
+                              object : GraphRequest.Callback {
+                                  override fun onCompleted(response: GraphResponse) {
+                                      *//* handle the result *//*
+                                    Log.e("graphresponse", response.toString())
+                                }
+                            }
+                        ).executeAsync()*/
+
+
                     }
 
                     override fun onFail(error: String?) {
@@ -305,20 +398,17 @@ class MainActivity : AppCompatActivity() {
         })
 
         accessTokenTracker = object : AccessTokenTracker() {
+
             override fun onCurrentAccessTokenChanged(
-                oldAccessToken: AccessToken?,
-                currentAccessToken: AccessToken?
+                oldAccessToken: com.facebook.AccessToken?,
+                currentAccessToken: com.facebook.AccessToken?
             ) {
-               if (currentAccessToken==null){
-                   LoginManager.getInstance().logOut()
-                   tvUsername?.text = ""
-                   tvName?.text = ""
-               }
+                TODO("Not yet implemented")
             }
         }
         // If the access token is available already assign it.
         // If the access token is available already assign it.
-        accessToken = AccessToken.getCurrentAccessToken()
+//        accessToken = com.facebook.AccessToken.getCurrentAccessToken()!!
 
         profileTracker = object : ProfileTracker() {
             override fun onCurrentProfileChanged(
@@ -348,37 +438,45 @@ class MainActivity : AppCompatActivity() {
 
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        callbackManager?.onActivityResult(requestCode, resultCode, data)
         super.onActivityResult(requestCode, resultCode, data)
 
-        request1 = GraphRequest.newMeRequest(AccessToken.getCurrentAccessToken(), object : GraphRequest.GraphJSONObjectCallback{
-            override fun onCompleted(obj: JSONObject?, response: GraphResponse?) {
-                try {
-                    var email_id = obj?.getString("email")
-                    var gender = obj?.getString("gender")
-                    var profile_name = obj?.getString("name")
-                    var fb_id = obj?.getLong("id")
+        if (myStatusCode=="twitter"){
+            if (data != null) mTwitterVerifier = data?.extras?.getString(mAuthVerifier)
 
-                    Log.e("data", obj.toString())
-                    tvUsername?.text = obj?.getString("name")
-                    tvName?.text = obj?.getString("name")
-
-                }catch (e : JSONException){
-
-                }
+            val accessToken: AccessToken
+            try {
+                accessToken = mTwitter!!.getOAuthAccessToken(
+                    mRequestToken,
+                    mTwitterVerifier
+                )
+                tvName?.text = accessToken.screenName
+                tvUsername?.text = accessToken.screenName
+                //saveTwitterInformation(accessToken)
+            } catch (e: java.lang.Exception) {
             }
+        }else{
+            callbackManager?.onActivityResult(requestCode, resultCode, data)
+            request1 = GraphRequest.newMeRequest(com.facebook.AccessToken.getCurrentAccessToken(), object : GraphRequest.GraphJSONObjectCallback{
+                override fun onCompleted(obj: JSONObject?, response: GraphResponse?) {
+                    try {
+                        var email_id = obj?.getString("email")
+                        var gender = obj?.getString("gender")
+                        var profile_name = obj?.getString("name")
+                        var fb_id = obj?.getLong("id")
 
-        })
+                        Log.e("data", obj.toString())
+                        tvUsername?.text = obj?.getString("name")
+                        tvName?.text = obj?.getString("name")
 
-        /*var bundle = Bundle()
-        bundle.putString("fields")
-        bundle.putString("name")
-        bundle.putString("gender")
-        bundle.putString("email")
-        bundle.putString("first_name")
-        bundle.putString("last_name")*/
+                    }catch (e : JSONException){
 
-        request1?.executeAsync()
+                    }
+                }
+
+            })
+
+            request1?.executeAsync()
+        }
     }
 
     override fun onDestroy() {
@@ -399,7 +497,7 @@ class MainActivity : AppCompatActivity() {
                     urlConnection.setRequestMethod("POST")
                     urlConnection.setDoInput(true)
                     urlConnection.setDoOutput(true)
-                    // urlConnection.connect();
+                    urlConnection.connect()
                     val writer = OutputStreamWriter(
                         urlConnection.getOutputStream()
                     )
@@ -425,10 +523,10 @@ class MainActivity : AppCompatActivity() {
                     myName = ""
 
 
-                   // fetchUserName(handler, mAccessToken!!, id,user,name)
+                    //fetchUserName(handler, mAccessToken!!, id,"","")
 
 //                    mSession!!.getInstance().storeAccessToken(mAccessToken, id, user, name)
-                   // myInstagramDialog?.dismiss()
+                    // myInstagramDialog?.dismiss()
                 } catch (ex: Exception) {
                     what = WHAT_ERROR
                     ex.printStackTrace()
@@ -450,10 +548,9 @@ class MainActivity : AppCompatActivity() {
                 Log.i("TAG", "Fetching user info")
                 var what = WHAT_FINALIZE
                 try {
-                    val myToken = "IGQVJVSnpHS3JFSEJnN2pFRFEzOWJhNTlKR2ZAsYkhpR2xQSERiTV9kT3JRd1p0VzZAzR1hqV3kxTm9JNmNwcjE1dTNCOHZApcm9OMVB2eVRhOXVZAN015c1E5NjhHLWZADRmZAFMmJQcEpRMWpjLURrMlVwdAZDZD"
                     val url = URL(
-                        (API_URL + "/users/" + id
-                                + "/?access_token=" + myToken)
+                        (GRAPH_API_URL + "/${id}" + "?fields=id,username,media"
+                                + "&access_token=" + mAccessToken)
                     )
                     Log.d("TAG", "Opening URL " + url.toString())
                     val urlConnection: HttpURLConnection = url
@@ -461,37 +558,125 @@ class MainActivity : AppCompatActivity() {
                     urlConnection.setRequestMethod("GET")
                     urlConnection.setDoInput(true)
                     urlConnection.connect()
-                    val response: String? = Utils.streamToString(urlConnection.getInputStream())
+                    val response: String? = Utils.streamToString(
+                        urlConnection
+                            .getInputStream()
+                    )
                     println(response)
                     val jsonObj = JSONTokener(response)
                         .nextValue() as JSONObject
+                    myUserName = jsonObj.getString("username")
 
-                    // String name = jsonObj.getJSONObject("data").getString(
-                    // "full_name");
-                    // String bio =
-                    // jsonObj.getJSONObject("data").getString("bio");
-                    // Log.i(TAG, "Got name: " + name + ", bio [" + bio + "]");
-                    val data_obj = jsonObj.getJSONObject(TAG_DATA)
-                    userInfo[TAG_ID] = data_obj.getString(TAG_ID)
-                    userInfo[TAG_PROFILE_PICTURE] = data_obj.getString(TAG_PROFILE_PICTURE)
-                    userInfo[TAG_USERNAME] = data_obj.getString(TAG_USERNAME)
-                    myUserName = data_obj.getString(TAG_USERNAME)
-                    userInfo[TAG_BIO] = data_obj.getString(TAG_BIO)
-                    userInfo[TAG_WEBSITE] = data_obj.getString(TAG_WEBSITE)
-                    val counts_obj = data_obj.getJSONObject(TAG_COUNTS)
-                    userInfo[TAG_FOLLOWS] = counts_obj.getString(TAG_FOLLOWS)
-                    userInfo[TAG_FOLLOWED_BY] = counts_obj.getString(TAG_FOLLOWED_BY)
-                    userInfo[TAG_MEDIA] = counts_obj.getString(TAG_MEDIA)
-                    userInfo[TAG_FULL_NAME] = data_obj.getString(TAG_FULL_NAME)
-                    val meta_obj = jsonObj.getJSONObject(TAG_META)
-                    userInfo[TAG_CODE] = meta_obj.getString(TAG_CODE)
-                    myInstagramDialog?.dismiss()
-                } catch (ex: Exception) {
+                } catch (ex: java.lang.Exception) {
                     what = WHAT_ERROR
                     ex.printStackTrace()
                 }
+
+
                 mHandler?.sendMessage(mHandler!!.obtainMessage(WHAT_FINALIZE, 2, 0))
             }
         }.start()
     }
+
+    //TwitterAuthentication
+    fun initSDK() {
+        mConsumerKey = resources.getString(R.string.twitter_consumer_key)
+        mConsumerSecret = resources.getString(R.string.twitter_consumer_secret_key)
+        mAuthVerifier = "oauth_verifier"
+        if (TextUtils.isEmpty(mConsumerKey)
+            || TextUtils.isEmpty(mConsumerSecret)
+        ) {
+            return
+        }
+        mSharedPreferences = getSharedPreferences(PREF_NAME, 0)
+        if (isAuthenticated()) {
+            Toast.makeText(applicationContext, "Success", Toast.LENGTH_SHORT).show()
+            //hide login button here and show tweet
+
+            mSharedPreferences?.getString(PREF_USER_NAME, "")
+            tvUsername?.setText("Welcome " + mSharedPreferences?.getString(PREF_USER_NAME, ""))
+            tvName?.setText("Welcome " + mSharedPreferences?.getString(PREF_USER_NAME, ""))
+        } else {
+            val uri: Uri? = intent.data
+            if (uri != null && uri.toString().startsWith(mCallbackUrl!!)) {
+                val verifier: String = uri.getQueryParameter(mAuthVerifier)!!
+                try {
+                    val accessToken = mTwitter!!.getOAuthAccessToken(
+                        mRequestToken, verifier
+                    )
+                    saveTwitterInformation(accessToken)
+                    Toast.makeText(applicationContext, "Success", Toast.LENGTH_SHORT).show()
+                } catch (e: java.lang.Exception) {
+                    Toast.makeText(applicationContext, "Failed", Toast.LENGTH_SHORT).show()
+                    Log.d(
+                        "Failed to login ",
+                        e.message!!
+                    )
+                }
+            }
+        }
+    }
+
+    protected fun isAuthenticated(): Boolean {
+        return mSharedPreferences!!.getBoolean(PREF_KEY_TWITTER_LOGIN, false)
+    }
+
+    private fun saveTwitterInformation(accessToken: AccessToken) {
+        val userID = accessToken.userId
+        val user: User
+        try {
+            user = mTwitter!!.showUser(userID)
+            val username = user.name
+            val e = mSharedPreferences!!.edit()
+            e.putString(PREF_KEY_OAUTH_TOKEN, accessToken.token)
+            e.putString(PREF_KEY_OAUTH_SECRET, accessToken.tokenSecret)
+            e.putBoolean(PREF_KEY_TWITTER_LOGIN, true)
+            e.putString(PREF_USER_NAME, username)
+            e.commit()
+        } catch (e1: TwitterException) {
+            Log.d("Failed to Save", e1.message!!)
+        }
+    }
+
+    private fun loginToTwitter() {
+        val isLoggedIn = mSharedPreferences!!.getBoolean(
+            PREF_KEY_TWITTER_LOGIN, false
+        )
+        if (!isLoggedIn) {
+            val builder = ConfigurationBuilder()
+            builder.setOAuthConsumerKey(mConsumerKey)
+            builder.setOAuthConsumerSecret(mConsumerSecret)
+            val configuration = builder.build()
+            val factory = TwitterFactory(configuration)
+            mTwitter = factory.instance
+            try {
+                mRequestToken = mTwitter?.getOAuthRequestToken(mCallbackUrl)
+                startWebAuthentication()
+            } catch (e: TwitterException) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun closeProgress() {
+        if (mPostProgress != null && mPostProgress!!.isShowing()) {
+            mPostProgress!!.dismiss()
+            mPostProgress = null
+        }
+    }
+
+    protected fun startWebAuthentication() {
+        val intent = Intent(
+            this@MainActivity,
+            TwitterAuthenticationActivity::class.java
+        )
+        intent.putExtra(
+            TwitterAuthenticationActivity.EXTRA_URL,
+            mRequestToken!!.authenticationURL
+        )
+        myStatusCode = "twitter"
+        startActivityForResult(intent, WEBVIEW_REQUEST_CODE)
+    }
+
+
 }

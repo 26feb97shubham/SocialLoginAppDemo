@@ -16,6 +16,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SocialLoginAppDemo">
         <activity
+            android:name=".TwitterAuthenticationActivity"
+            android:exported="false" />
+        <activity
             android:name=".WebViewActivity"
             android:exported="false" />
         <activity
